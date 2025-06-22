@@ -52,6 +52,10 @@ if (!fs.existsSync('uploads')) {
 let memos = [];
 let connectedUsers = new Map();
 
+// 存儲點讚和評論數據
+let likes = []; // { id, memoId, userId, userName, createdAt }
+let comments = []; // { id, memoId, userId, userName, content, createdAt }
+
 // 記事版和Admin系統
 let boards = [
   {
@@ -148,6 +152,9 @@ io.on('connection', (socket) => {
   // 處理memo刪除
   socket.on('delete-memo', (memoId) => {
     memos = memos.filter(m => m.id !== memoId);
+    // 同時刪除相關的點讚和評論
+    likes = likes.filter(like => like.memoId !== memoId);
+    comments = comments.filter(comment => comment.memoId !== memoId);
     // 廣播刪除事件給所有用戶
     io.emit('memo-deleted', memoId);
     console.log('Memo已刪除:', memoId);
@@ -188,7 +195,12 @@ io.on('connection', (socket) => {
     const isAdmin = adminUsers.has(socket.id);
     if (isAdmin && boardId !== 'default') {
       boards = boards.filter(b => b.id !== boardId);
+      // 獲取要刪除的memo ID列表
+      const boardMemoIds = memos.filter(m => m.boardId === boardId).map(m => m.id);
       memos = memos.filter(m => m.boardId !== boardId);
+      // 同時刪除相關的點讚和評論
+      likes = likes.filter(like => !boardMemoIds.includes(like.memoId));
+      comments = comments.filter(comment => !boardMemoIds.includes(comment.memoId));
       io.emit('board-deleted', boardId);
       console.log('記事版已刪除:', boardId);
     } else {
@@ -201,6 +213,9 @@ io.on('connection', (socket) => {
     const isAdmin = adminUsers.has(socket.id);
     if (isAdmin) {
       memos = memos.filter(m => m.id !== memoId);
+      // 同時刪除相關的點讚和評論
+      likes = likes.filter(like => like.memoId !== memoId);
+      comments = comments.filter(comment => comment.memoId !== memoId);
       io.emit('memo-deleted', memoId);
       console.log('Admin刪除memo:', memoId);
     } else {
@@ -215,7 +230,11 @@ io.on('connection', (socket) => {
       if (boardId) {
         // 清除指定記事版的memo
         const beforeCount = memos.length;
+        const boardMemoIds = memos.filter(m => m.boardId === boardId).map(m => m.id);
         memos = memos.filter(m => m.boardId !== boardId);
+        // 同時清除相關的點讚和評論
+        likes = likes.filter(like => !boardMemoIds.includes(like.memoId));
+        comments = comments.filter(comment => !boardMemoIds.includes(comment.memoId));
         const afterCount = memos.length;
         console.log(`Admin清除了記事版 ${boardId} 的 ${beforeCount - afterCount} 個memo`);
         
@@ -224,6 +243,8 @@ io.on('connection', (socket) => {
       } else {
         // 清除所有memo（如果沒有指定boardId）
         memos = [];
+        likes = [];
+        comments = [];
         console.log('Admin清除了所有memo');
         io.emit('all-memos', memos);
       }
@@ -238,6 +259,77 @@ io.on('connection', (socket) => {
     // 發送該記事版的memo給用戶
     const boardMemos = memos.filter(m => m.boardId === boardId);
     socket.emit('all-memos', boardMemos);
+  });
+
+  // 處理點讚
+  socket.on('like-memo', (memoId) => {
+    const userId = socket.id;
+    const userName = `用戶${userId.slice(-4)}`;
+    
+    // 檢查用戶是否已經點讚過
+    const existingLike = likes.find(like => like.memoId === memoId && like.userId === userId);
+    
+    if (existingLike) {
+      // 取消點讚
+      likes = likes.filter(like => !(like.memoId === memoId && like.userId === userId));
+      console.log(`用戶 ${userName} 取消點讚 memo: ${memoId}`);
+    } else {
+      // 添加點讚
+      const newLike = {
+        id: uuidv4(),
+        memoId: memoId,
+        userId: userId,
+        userName: userName,
+        createdAt: new Date().toISOString()
+      };
+      likes.push(newLike);
+      console.log(`用戶 ${userName} 點讚 memo: ${memoId}`);
+      
+      // 廣播新點讚給所有用戶
+      io.emit('new-like', newLike);
+    }
+    
+    // 發送該memo的所有點讚給所有用戶
+    const memoLikes = likes.filter(like => like.memoId === memoId);
+    io.emit('memo-likes', memoId, memoLikes);
+  });
+
+  // 處理評論
+  socket.on('comment-memo', (data) => {
+    const { memoId, content } = data;
+    const userId = socket.id;
+    const userName = `用戶${userId.slice(-4)}`;
+    
+    const newComment = {
+      id: uuidv4(),
+      memoId: memoId,
+      userId: userId,
+      userName: userName,
+      content: content,
+      createdAt: new Date().toISOString()
+    };
+    
+    comments.push(newComment);
+    console.log(`用戶 ${userName} 評論 memo ${memoId}: ${content}`);
+    
+    // 廣播新評論給所有用戶
+    io.emit('new-comment', newComment);
+    
+    // 發送該memo的所有評論給所有用戶
+    const memoComments = comments.filter(comment => comment.memoId === memoId);
+    io.emit('memo-comments', memoId, memoComments);
+  });
+
+  // 獲取memo的點讚列表
+  socket.on('get-memo-likes', (memoId) => {
+    const memoLikes = likes.filter(like => like.memoId === memoId);
+    socket.emit('memo-likes', memoId, memoLikes);
+  });
+
+  // 獲取memo的評論列表
+  socket.on('get-memo-comments', (memoId) => {
+    const memoComments = comments.filter(comment => comment.memoId === memoId);
+    socket.emit('memo-comments', memoId, memoComments);
   });
 
   // 用戶斷開連接
@@ -266,6 +358,18 @@ app.get('/api/boards/:boardId/memos', (req, res) => {
   res.json(boardMemos);
 });
 
+// 獲取memo的點讚
+app.get('/api/memos/:memoId/likes', (req, res) => {
+  const memoLikes = likes.filter(like => like.memoId === req.params.memoId);
+  res.json(memoLikes);
+});
+
+// 獲取memo的評論
+app.get('/api/memos/:memoId/comments', (req, res) => {
+  const memoComments = comments.filter(comment => comment.memoId === req.params.memoId);
+  res.json(memoComments);
+});
+
 // 圖片上傳端點
 app.post('/api/upload', upload.single('image'), (req, res) => {
   if (!req.file) {
@@ -281,6 +385,8 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     memos: memos.length, 
+    likes: likes.length,
+    comments: comments.length,
     connectedUsers: connectedUsers.size 
   });
 });
