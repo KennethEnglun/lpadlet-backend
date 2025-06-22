@@ -113,10 +113,11 @@ let adminUsers = new Set();
 
 // Socket.io 連接處理
 io.on('connection', (socket) => {
-  console.log('用戶已連接:', socket.id);
+  console.log('🔌 用戶已連接:', socket.id);
 
   // 當用戶加入時，發送所有現有的memo給他們
   socket.emit('all-memos', memos);
+  console.log(`📝 已發送 ${memos.length} 個memos給用戶 ${socket.id}`);
   
   // 廣播用戶數量
   connectedUsers.set(socket.id, {
@@ -125,15 +126,17 @@ io.on('connection', (socket) => {
   });
   
   io.emit('user-count', connectedUsers.size);
+  console.log(`👥 當前連接用戶數: ${connectedUsers.size}`);
 
   // 發送記事版列表給新用戶
   socket.emit('all-boards', boards);
+  console.log(`📋 已發送 ${boards.length} 個記事版給用戶 ${socket.id}`);
 
   // 檢查是否為admin並發送用戶信息
   const isAdmin = socket.handshake.query.admin === 'admin123';
   if (isAdmin) {
     adminUsers.add(socket.id);
-    console.log('管理員已連接:', socket.id);
+    console.log('👑 管理員已連接:', socket.id);
   }
   
   socket.emit('user-info', {
@@ -142,6 +145,7 @@ io.on('connection', (socket) => {
     isAdmin: isAdmin,
     joinedAt: new Date()
   });
+  console.log(`👤 已發送用戶信息給 ${socket.id}`);
 
   // 處理新memo創建
   socket.on('create-memo', (memoData) => {
@@ -328,6 +332,8 @@ io.on('connection', (socket) => {
 
   // 處理點讚 - 改進版本
   socket.on('like-memo', (memoId) => {
+    console.log(`❤️ 收到點讚請求: 用戶 ${socket.id} -> memo ${memoId}`);
+    
     const userId = socket.id;
     const userName = `用戶${userId.slice(-4)}`;
     const debounceKey = `${userId}-${memoId}`;
@@ -336,7 +342,7 @@ io.on('connection', (socket) => {
     // 檢查防抖
     const lastLikeTime = likeDebounce.get(debounceKey);
     if (lastLikeTime && (now - lastLikeTime) < LIKE_DEBOUNCE_TIME) {
-      console.log(`點讚被防抖阻止: ${userName} -> ${memoId}`);
+      console.log(`⏱️ 點讚被防抖阻止: ${userName} -> ${memoId}`);
       return;
     }
     
@@ -346,7 +352,7 @@ io.on('connection', (socket) => {
     if (existingLikeIndex !== -1) {
       // 取消點讚
       likes.splice(existingLikeIndex, 1);
-      console.log(`用戶 ${userName} 取消點讚 memo: ${memoId}`);
+      console.log(`💔 用戶 ${userName} 取消點讚 memo: ${memoId}`);
     } else {
       // 添加點讚
       const newLike = {
@@ -357,10 +363,11 @@ io.on('connection', (socket) => {
         createdAt: new Date().toISOString()
       };
       likes.push(newLike);
-      console.log(`用戶 ${userName} 點讚 memo: ${memoId}`);
+      console.log(`💖 用戶 ${userName} 點讚 memo: ${memoId}`);
       
       // 廣播新點讚給所有用戶
       io.emit('new-like', newLike);
+      console.log(`📡 已廣播新點讚給所有用戶`);
     }
     
     // 更新防抖時間戳
@@ -372,21 +379,26 @@ io.on('connection', (socket) => {
     // 發送該memo的所有點讚給所有用戶
     const memoLikes = likes.filter(like => like.memoId === memoId);
     io.emit('memo-likes', memoId, memoLikes);
+    console.log(`📡 已發送memo ${memoId} 的 ${memoLikes.length} 個點讚給所有用戶`);
   });
 
   // 處理評論 - 改進版本
   socket.on('comment-memo', (data) => {
+    console.log(`💬 收到評論請求: 用戶 ${socket.id}`, data);
+    
     const { memoId, content } = data;
     const userId = socket.id;
     const userName = `用戶${userId.slice(-4)}`;
     
     // 驗證內容
     if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      console.log(`❌ 評論內容為空，拒絕請求`);
       socket.emit('error', { message: '評論內容不能為空' });
       return;
     }
     
     if (content.length > 500) {
+      console.log(`❌ 評論內容過長，拒絕請求`);
       socket.emit('error', { message: '評論內容過長' });
       return;
     }
@@ -401,17 +413,19 @@ io.on('connection', (socket) => {
     };
     
     comments.push(newComment);
-    console.log(`用戶 ${userName} 評論 memo ${memoId}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
+    console.log(`✅ 用戶 ${userName} 評論 memo ${memoId}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
     
     // 保存評論數據
     saveData(DATA_FILES.comments, comments);
     
     // 廣播新評論給所有用戶
     io.emit('new-comment', newComment);
+    console.log(`📡 已廣播新評論給所有用戶`);
     
     // 發送該memo的所有評論給所有用戶
     const memoComments = comments.filter(comment => comment.memoId === memoId);
     io.emit('memo-comments', memoId, memoComments);
+    console.log(`📡 已發送memo ${memoId} 的 ${memoComments.length} 個評論給所有用戶`);
   });
 
   // 獲取memo的點讚列表
