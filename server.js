@@ -5,6 +5,7 @@ const cors = require('cors');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -43,18 +44,56 @@ const upload = multer({
 });
 
 // 創建uploads目錄
-const fs = require('fs');
 if (!fs.existsSync('uploads')) {
   fs.mkdirSync('uploads');
 }
 
+// 創建數據存儲目錄
+if (!fs.existsSync('data')) {
+  fs.mkdirSync('data');
+}
+
+// 數據文件路徑
+const DATA_FILES = {
+  likes: './data/likes.json',
+  comments: './data/comments.json',
+  memos: './data/memos.json'
+};
+
+// 加載數據的函數
+const loadData = (filePath, defaultValue = []) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error(`載入數據失敗 ${filePath}:`, error);
+  }
+  return defaultValue;
+};
+
+// 保存數據的函數
+const saveData = (filePath, data) => {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    console.log(`數據已保存到 ${filePath}`);
+  } catch (error) {
+    console.error(`保存數據失敗 ${filePath}:`, error);
+  }
+};
+
 // 存儲所有memo貼的數據
-let memos = [];
+let memos = loadData(DATA_FILES.memos, []);
 let connectedUsers = new Map();
 
 // 存儲點讚和評論數據
-let likes = []; // { id, memoId, userId, userName, createdAt }
-let comments = []; // { id, memoId, userId, userName, content, createdAt }
+let likes = loadData(DATA_FILES.likes, []); // { id, memoId, userId, userName, createdAt }
+let comments = loadData(DATA_FILES.comments, []); // { id, memoId, userId, userName, content, createdAt }
+
+// 防抖機制 - 防止重複快速點讚
+const likeDebounce = new Map(); // userId-memoId -> timestamp
+const LIKE_DEBOUNCE_TIME = 1000; // 1秒防抖
 
 // 記事版和Admin系統
 let boards = [
@@ -121,6 +160,9 @@ io.on('connection', (socket) => {
     
     memos.push(newMemo);
     
+    // 保存memo數據
+    saveData(DATA_FILES.memos, memos);
+    
     // 廣播新memo給所有用戶
     io.emit('new-memo', newMemo);
     console.log('新memo已創建:', newMemo.id, '用戶:', newMemo.userName || '匿名');
@@ -155,6 +197,12 @@ io.on('connection', (socket) => {
     // 同時刪除相關的點讚和評論
     likes = likes.filter(like => like.memoId !== memoId);
     comments = comments.filter(comment => comment.memoId !== memoId);
+    
+    // 保存更新後的數據
+    saveData(DATA_FILES.memos, memos);
+    saveData(DATA_FILES.likes, likes);
+    saveData(DATA_FILES.comments, comments);
+    
     // 廣播刪除事件給所有用戶
     io.emit('memo-deleted', memoId);
     console.log('Memo已刪除:', memoId);
@@ -216,6 +264,12 @@ io.on('connection', (socket) => {
       // 同時刪除相關的點讚和評論
       likes = likes.filter(like => like.memoId !== memoId);
       comments = comments.filter(comment => comment.memoId !== memoId);
+      
+      // 保存更新後的數據
+      saveData(DATA_FILES.memos, memos);
+      saveData(DATA_FILES.likes, likes);
+      saveData(DATA_FILES.comments, comments);
+      
       io.emit('memo-deleted', memoId);
       console.log('Admin刪除memo:', memoId);
     } else {
@@ -238,6 +292,11 @@ io.on('connection', (socket) => {
         const afterCount = memos.length;
         console.log(`Admin清除了記事版 ${boardId} 的 ${beforeCount - afterCount} 個memo`);
         
+        // 保存更新後的數據
+        saveData(DATA_FILES.memos, memos);
+        saveData(DATA_FILES.likes, likes);
+        saveData(DATA_FILES.comments, comments);
+        
         // 發送更新後的memo列表給所有用戶
         io.emit('all-memos', memos);
       } else {
@@ -245,6 +304,12 @@ io.on('connection', (socket) => {
         memos = [];
         likes = [];
         comments = [];
+        
+        // 保存清空的數據
+        saveData(DATA_FILES.memos, memos);
+        saveData(DATA_FILES.likes, likes);
+        saveData(DATA_FILES.comments, comments);
+        
         console.log('Admin清除了所有memo');
         io.emit('all-memos', memos);
       }
@@ -261,17 +326,26 @@ io.on('connection', (socket) => {
     socket.emit('all-memos', boardMemos);
   });
 
-  // 處理點讚
+  // 處理點讚 - 改進版本
   socket.on('like-memo', (memoId) => {
     const userId = socket.id;
     const userName = `用戶${userId.slice(-4)}`;
+    const debounceKey = `${userId}-${memoId}`;
+    const now = Date.now();
+    
+    // 檢查防抖
+    const lastLikeTime = likeDebounce.get(debounceKey);
+    if (lastLikeTime && (now - lastLikeTime) < LIKE_DEBOUNCE_TIME) {
+      console.log(`點讚被防抖阻止: ${userName} -> ${memoId}`);
+      return;
+    }
     
     // 檢查用戶是否已經點讚過
-    const existingLike = likes.find(like => like.memoId === memoId && like.userId === userId);
+    const existingLikeIndex = likes.findIndex(like => like.memoId === memoId && like.userId === userId);
     
-    if (existingLike) {
+    if (existingLikeIndex !== -1) {
       // 取消點讚
-      likes = likes.filter(like => !(like.memoId === memoId && like.userId === userId));
+      likes.splice(existingLikeIndex, 1);
       console.log(`用戶 ${userName} 取消點讚 memo: ${memoId}`);
     } else {
       // 添加點讚
@@ -289,28 +363,48 @@ io.on('connection', (socket) => {
       io.emit('new-like', newLike);
     }
     
+    // 更新防抖時間戳
+    likeDebounce.set(debounceKey, now);
+    
+    // 保存點讚數據
+    saveData(DATA_FILES.likes, likes);
+    
     // 發送該memo的所有點讚給所有用戶
     const memoLikes = likes.filter(like => like.memoId === memoId);
     io.emit('memo-likes', memoId, memoLikes);
   });
 
-  // 處理評論
+  // 處理評論 - 改進版本
   socket.on('comment-memo', (data) => {
     const { memoId, content } = data;
     const userId = socket.id;
     const userName = `用戶${userId.slice(-4)}`;
+    
+    // 驗證內容
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      socket.emit('error', { message: '評論內容不能為空' });
+      return;
+    }
+    
+    if (content.length > 500) {
+      socket.emit('error', { message: '評論內容過長' });
+      return;
+    }
     
     const newComment = {
       id: uuidv4(),
       memoId: memoId,
       userId: userId,
       userName: userName,
-      content: content,
+      content: content.trim(),
       createdAt: new Date().toISOString()
     };
     
     comments.push(newComment);
-    console.log(`用戶 ${userName} 評論 memo ${memoId}: ${content}`);
+    console.log(`用戶 ${userName} 評論 memo ${memoId}: ${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`);
+    
+    // 保存評論數據
+    saveData(DATA_FILES.comments, comments);
     
     // 廣播新評論給所有用戶
     io.emit('new-comment', newComment);
