@@ -119,6 +119,18 @@ io.on('connection', (socket) => {
   socket.emit('all-memos', memos);
   console.log(`📝 已發送 ${memos.length} 個memos給用戶 ${socket.id}`);
   
+  // 發送所有現有的點讚數據
+  if (likes.length > 0) {
+    socket.emit('all-likes', likes);
+    console.log(`❤️ 已發送 ${likes.length} 個點讚給用戶 ${socket.id}`);
+  }
+  
+  // 發送所有現有的留言數據
+  if (comments.length > 0) {
+    socket.emit('all-comments', comments);
+    console.log(`💬 已發送 ${comments.length} 個留言給用戶 ${socket.id}`);
+  }
+  
   // 廣播用戶數量
   connectedUsers.set(socket.id, {
     id: socket.id,
