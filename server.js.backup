@@ -52,22 +52,6 @@ if (!fs.existsSync('uploads')) {
 let memos = [];
 let connectedUsers = new Map();
 
-// 記事版和Admin系統
-let boards = [
-  {
-    id: 'default',
-    name: '主記事版',
-    theme: 'default',
-    description: '預設的公共記事版',
-    createdAt: new Date(),
-    createdBy: 'system',
-    isPublic: true
-  }
-];
-
-// Admin用戶列表（使用查詢參數admin=admin123來成為管理員）
-let adminUsers = new Set();
-
 // Socket.io 連接處理
 io.on('connection', (socket) => {
   console.log('用戶已連接:', socket.id);
@@ -83,23 +67,6 @@ io.on('connection', (socket) => {
   
   io.emit('user-count', connectedUsers.size);
 
-  // 發送記事版列表給新用戶
-  socket.emit('all-boards', boards);
-
-  // 檢查是否為admin並發送用戶信息
-  const isAdmin = socket.handshake.query.admin === 'admin123';
-  if (isAdmin) {
-    adminUsers.add(socket.id);
-    console.log('管理員已連接:', socket.id);
-  }
-  
-  socket.emit('user-info', {
-    id: socket.id,
-    name: `用戶${socket.id.slice(-4)}`,
-    isAdmin: isAdmin,
-    joinedAt: new Date()
-  });
-
   // 處理新memo創建
   socket.on('create-memo', (memoData) => {
     const newMemo = {
@@ -109,7 +76,6 @@ io.on('connection', (socket) => {
       x: memoData.x || Math.random() * 800,
       y: memoData.y || Math.random() * 600,
       color: memoData.color || '#ffd700',
-      boardId: memoData.boardId || 'default',
       createdAt: new Date(),
       createdBy: socket.id
     };
@@ -161,68 +127,9 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Admin專用：創建記事版
-  socket.on('create-board', (boardData) => {
-    const isAdmin = adminUsers.has(socket.id);
-    if (isAdmin) {
-      const newBoard = {
-        id: uuidv4(),
-        name: boardData.name,
-        theme: boardData.theme || 'default',
-        description: boardData.description || '',
-        createdAt: new Date(),
-        createdBy: socket.id,
-        isPublic: boardData.isPublic !== false
-      };
-      boards.push(newBoard);
-      io.emit('board-created', newBoard);
-      console.log('新記事版已創建:', newBoard.name);
-    } else {
-      socket.emit('error', { message: '權限不足' });
-    }
-  });
-
-  // Admin專用：刪除記事版
-  socket.on('delete-board', (boardId) => {
-    const isAdmin = adminUsers.has(socket.id);
-    if (isAdmin && boardId !== 'default') {
-      boards = boards.filter(b => b.id !== boardId);
-      memos = memos.filter(m => m.boardId !== boardId);
-      io.emit('board-deleted', boardId);
-      console.log('記事版已刪除:', boardId);
-    } else {
-      socket.emit('error', { message: '權限不足或無法刪除預設記事版' });
-    }
-  });
-
-  // Admin專用：刪除任何memo
-  socket.on('admin-delete-memo', (memoId) => {
-    const isAdmin = adminUsers.has(socket.id);
-    if (isAdmin) {
-      memos = memos.filter(m => m.id !== memoId);
-      io.emit('memo-deleted', memoId);
-      console.log('Admin刪除memo:', memoId);
-    } else {
-      socket.emit('error', { message: '權限不足' });
-    }
-  });
-
-  // Admin專用：清除所有memo
-  socket.on('admin-clear-all-memos', () => {
-    const isAdmin = adminUsers.has(socket.id);
-    if (isAdmin) {
-      memos = [];
-      io.emit('all-memos-cleared');
-      console.log('Admin清除了所有memo');
-    } else {
-      socket.emit('error', { message: '權限不足' });
-    }
-  });
-
   // 用戶斷開連接
   socket.on('disconnect', () => {
     console.log('用戶已斷開連接:', socket.id);
-    adminUsers.delete(socket.id);
     connectedUsers.delete(socket.id);
     io.emit('user-count', connectedUsers.size);
     io.emit('user-disconnected', socket.id);
@@ -232,17 +139,6 @@ io.on('connection', (socket) => {
 // API 路由
 app.get('/api/memos', (req, res) => {
   res.json(memos);
-});
-
-// 獲取所有記事版
-app.get('/api/boards', (req, res) => {
-  res.json(boards);
-});
-
-// 獲取特定記事版的memo
-app.get('/api/boards/:boardId/memos', (req, res) => {
-  const boardMemos = memos.filter(m => m.boardId === req.params.boardId);
-  res.json(boardMemos);
 });
 
 // 圖片上傳端點
