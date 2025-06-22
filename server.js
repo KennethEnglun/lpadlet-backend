@@ -111,14 +111,15 @@ io.on('connection', (socket) => {
       color: memoData.color || '#ffd700',
       boardId: memoData.boardId || 'default',
       createdAt: new Date(),
-      createdBy: socket.id
+      createdBy: socket.id,
+      userName: memoData.userName || null
     };
     
     memos.push(newMemo);
     
     // 廣播新memo給所有用戶
     io.emit('new-memo', newMemo);
-    console.log('新memo已創建:', newMemo.id);
+    console.log('新memo已創建:', newMemo.id, '用戶:', newMemo.userName || '匿名');
   });
 
   // 處理memo位置更新
