@@ -95,18 +95,21 @@ let comments = loadData(DATA_FILES.comments, []); // { id, memoId, userId, userN
 const likeDebounce = new Map(); // userId-memoId -> timestamp
 const LIKE_DEBOUNCE_TIME = 1000; // 1秒防抖
 
-// 記事版和Admin系統
-let boards = [
-  {
-    id: 'default',
-    name: '主記事版',
-    theme: 'default',
-    description: '預設的公共記事版',
-    createdAt: new Date(),
-    createdBy: 'system',
-    isPublic: true
-  }
+// 記事版和Admin系統 - 更新為科目分區系統
+const subjects = [
+  { id: 'chinese', name: '中文', icon: '📝' },
+  { id: 'english', name: '英文', icon: '🔤' },
+  { id: 'math', name: '數學', icon: '🔢' },
+  { id: 'science', name: '科學', icon: '🔬' },
+  { id: 'humanities', name: '人文', icon: '🏛️' },
+  { id: 'mandarin', name: '普通話', icon: '🗣️' },
+  { id: 'visual-arts', name: '視藝', icon: '🎨' },
+  { id: 'music', name: '音樂', icon: '🎵' },
+  { id: 'library', name: '圖書', icon: '📚' },
+  { id: 'pe', name: '體育', icon: '⚽' }
 ];
+
+let boards = []; // 移除預設的主記事版
 
 // Admin用戶列表（使用查詢參數admin=admin123來成為管理員）
 let adminUsers = new Set();
@@ -143,6 +146,10 @@ io.on('connection', (socket) => {
   // 發送記事版列表給新用戶
   socket.emit('all-boards', boards);
   console.log(`📋 已發送 ${boards.length} 個記事版給用戶 ${socket.id}`);
+
+  // 發送科目列表給新用戶
+  socket.emit('all-subjects', subjects);
+  console.log(`📚 已發送 ${subjects.length} 個科目給用戶 ${socket.id}`);
 
   // 檢查是否為admin並發送用戶信息
   const isAdmin = socket.handshake.query.admin === 'admin123';
@@ -233,24 +240,29 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Admin專用：創建記事版
+  // 處理記事版創建 - 更新為支援科目分區
   socket.on('create-board', (boardData) => {
-    const isAdmin = adminUsers.has(socket.id);
-    if (isAdmin) {
+    console.log('收到創建記事版請求:', boardData);
+    
+    if (adminUsers.has(socket.id)) {
       const newBoard = {
         id: uuidv4(),
         name: boardData.name,
         theme: boardData.theme || 'default',
         description: boardData.description || '',
+        subjectId: boardData.subjectId, // 新增科目ID
         createdAt: new Date(),
         createdBy: socket.id,
-        isPublic: boardData.isPublic !== false
+        isPublic: true
       };
+      
       boards.push(newBoard);
+      console.log('新記事版已創建:', newBoard.name, '科目:', boardData.subjectId);
+      
+      // 廣播新記事版給所有用戶
       io.emit('board-created', newBoard);
-      console.log('新記事版已創建:', newBoard.name);
     } else {
-      socket.emit('error', { message: '權限不足' });
+      socket.emit('error', { message: '只有管理員可以創建記事版' });
     }
   });
 
@@ -470,6 +482,17 @@ app.get('/api/memos', (req, res) => {
 // 獲取所有記事版
 app.get('/api/boards', (req, res) => {
   res.json(boards);
+});
+
+// 獲取所有科目
+app.get('/api/subjects', (req, res) => {
+  res.json(subjects);
+});
+
+// 獲取特定科目的記事版
+app.get('/api/subjects/:subjectId/boards', (req, res) => {
+  const subjectBoards = boards.filter(b => b.subjectId === req.params.subjectId);
+  res.json(subjectBoards);
 });
 
 // 獲取特定記事版的memo
