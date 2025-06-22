@@ -396,4 +396,5 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`服務器運行在端口 ${PORT}`);
   console.log(`健康檢查: http://localhost:${PORT}/health`);
+  console.log(`點讚和評論功能已啟用 - 版本 v1.1`);
 }); 
