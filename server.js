@@ -208,15 +208,35 @@ io.on('connection', (socket) => {
   });
 
   // Admin專用：清除所有memo
-  socket.on('admin-clear-all-memos', () => {
+  socket.on('admin-clear-all-memos', (boardId) => {
     const isAdmin = adminUsers.has(socket.id);
     if (isAdmin) {
-      memos = [];
-      io.emit('all-memos-cleared');
-      console.log('Admin清除了所有memo');
+      if (boardId) {
+        // 清除指定記事版的memo
+        const beforeCount = memos.length;
+        memos = memos.filter(m => m.boardId !== boardId);
+        const afterCount = memos.length;
+        console.log(`Admin清除了記事版 ${boardId} 的 ${beforeCount - afterCount} 個memo`);
+        
+        // 發送更新後的memo列表給所有用戶
+        io.emit('all-memos', memos);
+      } else {
+        // 清除所有memo（如果沒有指定boardId）
+        memos = [];
+        console.log('Admin清除了所有memo');
+        io.emit('all-memos', memos);
+      }
     } else {
       socket.emit('error', { message: '權限不足' });
     }
+  });
+
+  // 處理記事版切換
+  socket.on('switch-board', (boardId) => {
+    console.log(`用戶 ${socket.id} 切換到記事版: ${boardId}`);
+    // 發送該記事版的memo給用戶
+    const boardMemos = memos.filter(m => m.boardId === boardId);
+    socket.emit('all-memos', boardMemos);
   });
 
   // 用戶斷開連接
